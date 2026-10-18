@@ -85,7 +85,12 @@ export const hostHeaderAllowlist = (host: string): string[] | undefined => {
   return [...new Set([...localhostAllowedHostnames(), hostname])];
 };
 
-const jsonError = (status: number, code: number, message: string): Response =>
+/** A JSON-RPC error answered outside any session, so its id is null. */
+export const jsonRpcErrorResponse = (
+  status: number,
+  code: number,
+  message: string,
+): Response =>
   Response.json(
     { jsonrpc: "2.0", error: { code, message }, id: null },
     { status },
@@ -99,7 +104,7 @@ const describe = (cause: unknown): string =>
 
 const NO_SHUTDOWN_HOOK = (): void => undefined;
 const SHUTTING_DOWN = (): Response =>
-  jsonError(503, -32000, "Server shutting down");
+  jsonRpcErrorResponse(503, -32000, "Server shutting down");
 
 /** The headers the SDK requires of a streamable POST; a request without them is left to the transport's refusal. */
 const hasStreamablePostHeaders = (request: Request): boolean => {
@@ -247,7 +252,8 @@ export const serveStreamableHttp = async (
   let origin = "";
   let stopped = false;
   const route = async (request: Request): Promise<Response> => {
-    if (stopped) return jsonError(503, -32000, "Server shutting down");
+    if (stopped)
+      return jsonRpcErrorResponse(503, -32000, "Server shutting down");
     // One loopback allowlist gates Host (DNS rebinding) and Origin (browser pages); a missing Origin passes.
     const refused =
       allowedHosts === undefined
@@ -258,14 +264,18 @@ export const serveStreamableHttp = async (
     const { pathname } = new URL(request.url);
     if (pathname === MCP_HTTP_PATH)
       return slot === undefined
-        ? jsonError(503, -32000, "Server starting")
+        ? jsonRpcErrorResponse(503, -32000, "Server starting")
         : slot.handle(request);
     const match = routes.find(
       (candidate) =>
         candidate.path === pathname && candidate.method === request.method,
     );
     return match === undefined
-      ? jsonError(404, -32601, `No route for ${request.method} ${pathname}`)
+      ? jsonRpcErrorResponse(
+          404,
+          -32601,
+          `No route for ${request.method} ${pathname}`,
+        )
       : match.handle(request);
   };
   const httpServer = createHttpServer();
@@ -285,7 +295,7 @@ export const serveStreamableHttp = async (
       if (response.headersSent) response.destroy();
       else
         await writeWebResponse(
-          jsonError(500, -32603, "Internal server error"),
+          jsonRpcErrorResponse(500, -32603, "Internal server error"),
           response,
         ).catch(() => undefined);
     }
